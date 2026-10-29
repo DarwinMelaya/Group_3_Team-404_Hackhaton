@@ -1,0 +1,231 @@
+import Link from "next/link";
+import {
+  harvests,
+  municipalities,
+  priorityCount,
+  requirements,
+  totalKg,
+  verifiedCount,
+} from "../lib/demo";
+import { HarvestTable } from "./harvest-table";
+import { Icon, type IconName } from "./icon";
+
+function FieldIllustration() {
+  return (
+    <svg
+      className="field-illustration"
+      viewBox="0 0 400 280"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle cx="292" cy="74" r="42" fill="#C3D187" opacity="0.92" />
+      <path d="M0 228Q180 42 400 198V280H0Z" fill="#2D6320" />
+      <path d="M0 250Q150 112 400 212V280H0Z" fill="#5D912F" />
+      <path
+        d="M75 280Q230 130 400 220M135 280Q250 158 400 238M210 280Q300 195 400 255M0 235Q115 190 200 222M0 255Q90 220 135 246"
+        stroke="#C3D187"
+        strokeWidth="6"
+        strokeOpacity="0.72"
+      />
+      <path
+        d="M208 195V90m0 50c-35 0-48-22-43-42 29 0 43 17 43 42Zm0-16c0-30 21-44 44-39-1 24-20 40-44 39Z"
+        stroke="#C3D187"
+        strokeWidth="5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M345 170v-40m0 15c-18 0-26-12-23-23 17 0 23 10 23 23Z"
+        stroke="#94B54F"
+        strokeWidth="4"
+      />
+      <circle cx="100" cy="75" r="4" fill="#94B54F" />
+      <circle cx="142" cy="42" r="3" fill="#C3D187" />
+    </svg>
+  );
+}
+
+export function Dashboard() {
+  const metrics: {
+    label: string;
+    value: string;
+    foot: string;
+    icon: IconName;
+  }[] = [
+    {
+      label: "Aggregated sample supply",
+      value: `${totalKg.toLocaleString()} kg`,
+      foot: `Across ${harvests.length} sample listings in 6 municipalities`,
+      icon: "leaf",
+    },
+    {
+      label: "Advisory priority outreach",
+      value: String(priorityCount).padStart(2, "0"),
+      foot: "Farmer-flagged for priority buyer matching",
+      icon: "requests",
+    },
+    {
+      label: "Coordinator-reviewed (demo)",
+      value: `${verifiedCount} / ${harvests.length}`,
+      foot: "Sample verification status preview",
+      icon: "layers",
+    },
+    {
+      label: "Processor bulk requests",
+      value: String(requirements.length).padStart(2, "0"),
+      foot: "Illustrative Marinduque processing demand",
+      icon: "pin",
+    },
+  ];
+
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">
+            SMART-ANI · MUNICIPAL SUPPLY AGGREGATOR DASHBOARD
+          </p>
+          <h1>Good things are growing.</h1>
+          <p>
+            Coordinating smallholder harvests, barangay coordinators, and
+            value-add processors across Marinduque.
+          </p>
+        </div>
+        <div className="heading-actions">
+          <Link className="button secondary" href="/supply-pooling">
+            Supply pooling <Icon name="layers" size={16} />
+          </Link>
+          <Link className="button" href="/harvest-exchange">
+            Explore the exchange <Icon name="arrow" size={17} />
+          </Link>
+        </div>
+      </div>
+
+      <section className="hero">
+        <div className="hero-copy">
+          <span className="hero-kicker">
+            <span className="status-dot" /> SMART-ANI · POST-HARVEST EXCHANGE &
+            VALUE-ADDITION
+          </span>
+          <h2>
+            Reduce post-harvest spoilage.
+            <br />
+            Unlock value in every harvest.
+          </h2>
+          <p>
+            Connecting Uraro/Arrowroot, Cassava, Camote, Banana, Coconut, and
+            Vegetable growers with municipal pooling and food processors across
+            Boac, Mogpog, Santa Cruz, Torrijos, Buenavista, and Gasan.
+          </p>
+          <div className="hero-actions">
+            <Link href="/harvest-exchange" className="button light">
+              View available harvests <Icon name="arrow" size={18} />
+            </Link>
+            <Link href="/ai-value-add" className="button ghost-light">
+              AI Value-Add Simulator <Icon name="spark" size={17} />
+            </Link>
+          </div>
+        </div>
+        <FieldIllustration />
+        <span className="hero-tag">
+          MARINDUQUE · TEAM 404: SLEEP NOT FOUND
+        </span>
+      </section>
+
+      <section aria-label="Demo overview" className="metrics">
+        {metrics.map((metric) => (
+          <article className="metric" key={metric.label}>
+            <div className="metric-label">
+              {metric.label}
+              <span className="metric-icon">
+                <Icon name={metric.icon} size={18} />
+              </span>
+            </div>
+            <strong>{metric.value}</strong>
+            <span>{metric.foot}</span>
+          </article>
+        ))}
+      </section>
+
+      <div className="dashboard-grid">
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">COORDINATOR & PROCESSOR VIEW</p>
+              <h2>Harvest exchange preview</h2>
+              <p className="muted">
+                Recent sample surplus listings with illustrative verification
+                and farmer outreach priority.
+              </p>
+            </div>
+            <Link href="/harvest-exchange" className="text-link">
+              View all <Icon name="arrow" size={16} />
+            </Link>
+          </div>
+          <HarvestTable compact />
+        </section>
+
+        <section className="panel regional-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">MUNICIPAL SUPPLY AGGREGATOR</p>
+              <h2>Supply by municipality</h2>
+              <p className="muted">
+                Sample surplus volume across Marinduque’s 6 municipalities.
+              </p>
+            </div>
+          </div>
+          <div className="region-bars">
+            {municipalities.map((place) => {
+              const listingItems = harvests.filter(
+                (harvest) => harvest.municipality === place,
+              );
+              const quantity = listingItems.reduce(
+                (sum, harvest) => sum + harvest.quantity,
+                0,
+              );
+              const cropsLabel = listingItems.map((h) => h.crop).join(", ");
+              return (
+                <div key={place} className="region-bar-item">
+                  <div className="bar-label">
+                    <span>
+                      <strong>{place}</strong>{" "}
+                      <small>({cropsLabel || "No sample"})</small>
+                    </span>
+                    <strong>
+                      {quantity} <small>kg</small>
+                    </strong>
+                  </div>
+                  <div className="bar-track">
+                    <div style={{ width: `${(quantity / 460) * 100}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="panel-note">
+            Illustrative sample quantities only. Same-municipality pooling is
+            enforced in the prepared Phase 2 database schema.
+          </p>
+        </section>
+      </div>
+
+      <section className="value-banner">
+        <span className="value-icon">
+          <Icon name="spark" size={26} />
+        </span>
+        <div>
+          <p className="eyebrow">AI VALUE-ADD PROFIT SIMULATOR · ADVISORY</p>
+          <h2>Compare raw farmgate selling vs. value-added processing.</h2>
+          <p>
+            Inspect transparent conversion formulas for Banana Chips, Uraro
+            Flour, and Cassava Starch before committing raw surplus.
+          </p>
+        </div>
+        <Link href="/ai-value-add" className="button secondary">
+          Open simulator preview <Icon name="arrow" size={17} />
+        </Link>
+      </section>
+    </>
+  );
+}
