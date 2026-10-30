@@ -9,7 +9,7 @@ import {
   TextInput,
 } from "react-native";
 import type { ReactNode } from "react";
-import type { Harvest } from "../lib/harvest";
+import { evaluateSpoilageUrgency, unitLabel, type Harvest } from "../lib/harvest";
 import { colors, radii, spacing } from "../lib/theme";
 
 export { colors };
@@ -248,18 +248,27 @@ export function Choices({
 
 export function HarvestCard({ harvest }: { harvest: Harvest }) {
   const isPriority = harvest.priority === "Priority";
+  const earmarked = harvest.earmarkedKg ?? 0;
+  const reserved = harvest.reservedKg ?? 0;
+  const allocated = harvest.allocatedKg ?? earmarked + reserved;
+  const delivered = harvest.deliveredKg ?? 0;
+  const remaining =
+    harvest.remainingKg ??
+    Math.max(0, Number((harvest.quantity - allocated - delivered).toFixed(3)));
+  const spoilage = evaluateSpoilageUrgency(harvest);
+
   const statusLabel =
     harvest.status === "available"
-      ? "✓ Verified & Published"
+      ? "✓ Verified & Available for Allocation"
       : harvest.status === "pending_verification"
-        ? "◷ Pending Coordinator Verification"
+        ? "◷ Pending Admin Verification"
         : harvest.status === "rejected"
-          ? "✕ Rejected by Coordinator"
+          ? "✕ Rejected by Admin"
           : harvest.status === "draft"
-            ? "Draft"
+            ? "Offline Draft"
             : harvest.status === "closed"
-              ? "Closed"
-              : "Coordinator verification: Planned";
+              ? "✓ Fully Delivered / Closed"
+              : "✓ Ready for Market Allocation";
 
   return (
     <View
@@ -283,9 +292,12 @@ export function HarvestCard({ harvest }: { harvest: Harvest }) {
             {harvest.barangay} · {harvest.municipality}
           </Text>
         </View>
-        <Text style={isPriority ? styles.badgePriority : styles.badge}>
-          {isPriority ? "Priority · farmer selected" : "Standard priority"}
-        </Text>
+        <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+          <Text style={styles.badge}>{harvest.qualityGrade ?? "Grade A"}</Text>
+          <Text style={isPriority ? styles.badgePriority : styles.badge}>
+            {isPriority ? "Priority · farmer selected" : "Standard priority"}
+          </Text>
+        </View>
       </View>
 
       <View
@@ -295,33 +307,86 @@ export function HarvestCard({ harvest }: { harvest: Harvest }) {
           borderWidth: 1,
           borderRadius: radii.md,
           padding: 14,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
           gap: 10,
         }}
       >
-        <Text style={{ fontSize: 24, fontWeight: "800", color: colors.bush }}>
-          {harvest.quantity.toLocaleString()}{" "}
-          <Text style={{ fontSize: 14, fontWeight: "500", color: colors.muted }}>
-            kg available
-          </Text>
-        </Text>
-        <Text
+        <View
           style={{
-            fontSize: 18,
-            fontWeight: "800",
-            color: colors.brightNori,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 10,
           }}
         >
-          ₱{harvest.price.toLocaleString()}/kg
-        </Text>
+          <View>
+            <Text style={{ fontSize: 24, fontWeight: "800", color: colors.bush }}>
+              {remaining.toLocaleString()}{" "}
+              <Text style={{ fontSize: 14, fontWeight: "600", color: colors.muted }}>
+                {unitLabel(harvest.unit)} natitira (of {harvest.quantity.toLocaleString()} {unitLabel(harvest.unit)})
+              </Text>
+            </Text>
+          </View>
+          <Text
+            style={{
+              fontSize: 18,
+              fontWeight: "800",
+              color: colors.brightNori,
+            }}
+          >
+            ₱{harvest.price.toLocaleString()}/{unitLabel(harvest.unit)}
+          </Text>
+        </View>
+
+        <View
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: 12,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            paddingTop: 8,
+          }}
+        >
+          <Text style={{ fontSize: 12, color: colors.bush, fontWeight: "700" }}>
+            Kabuuang Dami: {harvest.quantity.toLocaleString()} {unitLabel(harvest.unit)}
+          </Text>
+          <Text style={{ fontSize: 12, color: colors.muted, fontWeight: "600" }}>
+            Inialok: {earmarked.toLocaleString()} {unitLabel(harvest.unit)}
+          </Text>
+          <Text style={{ fontSize: 12, color: colors.brightNori, fontWeight: "700" }}>
+            Nakalaan: {reserved.toLocaleString()} {unitLabel(harvest.unit)}
+          </Text>
+          <Text style={{ fontSize: 12, color: colors.bush, fontWeight: "700" }}>
+            Naihatid: {delivered.toLocaleString()} {unitLabel(harvest.unit)}
+          </Text>
+        </View>
       </View>
 
       <View style={styles.row}>
         <Text style={styles.subtitle}>
           Harvested {harvest.harvestDate} · {harvest.storage}
+          {harvest.photoRef ? ` · Photo/Note: ${harvest.photoRef}` : ""}
+        </Text>
+      </View>
+
+      <View
+        style={{
+          backgroundColor:
+            spoilage.level === "high" ? colors.softCelery : colors.surfaceSoft,
+          borderColor:
+            spoilage.level === "high" ? colors.venusFlytrap : colors.border,
+          borderWidth: 1,
+          borderRadius: radii.sm,
+          padding: 10,
+          gap: 3,
+        }}
+      >
+        <Text style={{ fontSize: 11, fontWeight: "800", color: colors.bush }}>
+          {spoilage.badgeText}
+        </Text>
+        <Text style={{ fontSize: 12, color: colors.muted }}>
+          {spoilage.advisoryText}
         </Text>
       </View>
 
@@ -347,7 +412,7 @@ export function HarvestCard({ harvest }: { harvest: Harvest }) {
                 harvest.status === "rejected" ? colors.dangerText : colors.bush,
             }}
           >
-            Coordinator review note: {harvest.reviewNotes}
+            Admin review note: {harvest.reviewNotes}
           </Text>
         </View>
       )}
@@ -359,29 +424,59 @@ export function HarvestCard({ harvest }: { harvest: Harvest }) {
           paddingTop: 10,
           flexDirection: "row",
           justifyContent: "space-between",
+          alignItems: "center",
           flexWrap: "wrap",
-          gap: 6,
+          gap: 8,
         }}
       >
-        <Text style={styles.eyebrow}>
-          {harvest.status
-            ? "LIVE SUPABASE RECORD · PROJECT AGRI"
-            : "DEMO RECORD · SAVED ON THIS BROWSER"}
-        </Text>
-        <Text
-          style={{
-            fontSize: 11,
-            color:
-              harvest.status === "rejected"
-                ? colors.dangerText
-                : harvest.status === "available"
-                  ? colors.brightNori
-                  : colors.muted,
-            fontWeight: "700",
-          }}
-        >
-          {statusLabel}
-        </Text>
+        <View style={{ gap: 2 }}>
+          <Text style={styles.eyebrow}>
+            {harvest.farmerId
+              ? "LIVE SUPABASE RECORD · PROJECT AGRI"
+              : "DEMO RECORD · SAVED ON THIS BROWSER"}
+          </Text>
+          <Text
+            style={{
+              fontSize: 11,
+              color:
+                harvest.status === "rejected"
+                  ? colors.dangerText
+                  : harvest.status === "available"
+                    ? colors.brightNori
+                    : colors.muted,
+              fontWeight: "700",
+            }}
+          >
+            {statusLabel}
+          </Text>
+        </View>
+        {remaining > 0 && harvest.status !== "rejected" && (
+          <Link
+            href={`/transactions?harvestId=${encodeURIComponent(harvest.id)}` as Href}
+            asChild
+          >
+            <Pressable
+              style={{
+                backgroundColor: colors.softCelery,
+                borderColor: colors.brightNori,
+                borderWidth: 1,
+                borderRadius: radii.sm,
+                paddingVertical: 8,
+                paddingHorizontal: 12,
+              }}
+            >
+              <Text
+                style={{
+                  color: colors.bush,
+                  fontSize: 12,
+                  fontWeight: "800",
+                }}
+              >
+                Allocate {remaining} kg to Markets →
+              </Text>
+            </Pressable>
+          </Link>
+        )}
       </View>
     </View>
   );

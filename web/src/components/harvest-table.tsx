@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { harvests as demoHarvests, money, municipalities } from "../lib/demo";
+import { evaluateDemoSpoilageUrgency, money, municipalities } from "../lib/demo";
 import { usePortalAuth } from "../lib/portal-auth";
 import { Icon } from "./icon";
 
@@ -18,30 +18,56 @@ function cropMarkText(crop: string): string {
 }
 
 export function HarvestExchangePanel() {
-  const { mode } = usePortalAuth();
+  const { mode, activeDemoRole } = usePortalAuth();
   const isLive = mode === "live";
 
   return (
     <section className="panel">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">SURPLUS MARKETPLACE</p>
+          <p className="eyebrow">
+            SURPLUS MARKETPLACE · ROLE: {activeDemoRole.toUpperCase()}
+          </p>
           <h2>Available harvests</h2>
           <p className="muted">
             {isLive
-              ? "Verified harvest listings from Supabase Agri (status = available). Coordinators can also review pending submissions above."
-              : "Search by crop, farmer, barangay, or municipality across all 6 sample listings."}
+              ? "Verified harvest listings from Supabase Agri (status = available). Admins can also review pending submissions above."
+              : "Search by crop, farmer, barangay, or municipality across all 6 listings, and track Total, Allocated, Delivered, and Remaining kilograms."}
           </p>
         </div>
         <span className="demo-chip">
           {isLive ? "LIVE SUPABASE AGRI" : "DEMO DATA"}
         </span>
       </div>
+
+      <div
+        style={{
+          background: "var(--surface-soft)",
+          border: "1px solid var(--venus-flytrap)",
+          borderRadius: 8,
+          padding: "8px 14px",
+          fontSize: 12,
+          color: "var(--bush)",
+          margin: "0 24px 14px",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <Icon name="spark" size={16} />
+        <span>
+          <strong>Freshness Advisory Notice:</strong> Estimated freshness
+          windows are advisory planning calculations only —{" "}
+          <u>never a guaranteed food safety expiration date</u>. Always inspect
+          crops physically upon delivery.
+        </span>
+      </div>
+
       <HarvestTable />
       <div className="panel-note">
         {isLive
-          ? "Live Supabase Mode is active. Farmer submissions start as pending_verification and appear in the marketplace only after a coordinator approves them via review_harvest_listing."
-          : "Demo Mode is active. Switch to Live Supabase Mode in the top navigation bar after configuring NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY."}
+          ? "Live Supabase Mode is active. Farmer submissions start as pending_verification and appear in the marketplace only after an Admin approves them via review_harvest_listing."
+          : "Demo Mode is active. Remaining harvest = Total harvest − Allocated (Offered + Reserved) − Confirmed Delivered. Switch to Supply Pooling to split-allocate 100 kg Banana across Market 1 (40 kg), Market 2 (35 kg), and Market 3 (25 kg)."}
       </div>
     </section>
   );
@@ -58,6 +84,9 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
     harvestsError,
     refreshLiveHarvests,
     reviewListing,
+    activeDemoRole,
+    demoHarvests,
+    adminReviewDemoHarvest,
   } = usePortalAuth();
 
   const [search, setSearch] = useState("");
@@ -72,10 +101,9 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
   const [reviewError, setReviewError] = useState("");
 
   const isLive = mode === "live";
-  const isCoordinator =
-    profile?.role === "coordinator" || profile?.role === "admin";
+  const isAdminLive = profile?.role === "admin";
 
-  async function handleCoordinatorDecision(
+  async function handleAdminLiveDecision(
     listingId: string,
     decision: "available" | "rejected",
   ) {
@@ -100,16 +128,41 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
       setReviewNotice(
         decision === "available"
           ? `Approved & published ${updated.crop} (${updated.quantity_kg} kg in ${updated.municipality}) to the Harvest Exchange.`
-          : `Rejected ${updated.crop} listing (${updated.municipality}) with coordinator notes.`,
+          : `Rejected ${updated.crop} listing (${updated.municipality}) with Admin review notes.`,
       );
     } catch (err) {
       setReviewError(
-        err instanceof Error
-          ? err.message
-          : "Coordinator verification RPC failed.",
+        err instanceof Error ? err.message : "Admin verification RPC failed.",
       );
     } finally {
       setReviewingId(null);
+    }
+  }
+
+  function handleAdminDemoDecision(
+    harvestId: string,
+    decision: "available" | "rejected",
+  ) {
+    setReviewError("");
+    setReviewNotice("");
+    try {
+      const updated = adminReviewDemoHarvest({
+        harvestId,
+        decision,
+        notes:
+          decision === "available"
+            ? "Verified by Admin for market allocation."
+            : "Rejected by Admin due to incomplete documentation.",
+      });
+      setReviewNotice(
+        decision === "available"
+          ? `Admin verified ${updated.crop} (${updated.quantity} kg by ${updated.farmer} in ${updated.municipality}).`
+          : `Admin rejected ${updated.crop} (${updated.id}).`,
+      );
+    } catch (err) {
+      setReviewError(
+        err instanceof Error ? err.message : "Could not review demo listing.",
+      );
     }
   }
 
@@ -118,13 +171,15 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
     if (!session || !profile) {
       return (
         <div className="empty-state">
-          <span className="pill amber">LIVE SUPABASE MODE · SIGN-IN REQUIRED</span>
+          <span className="pill amber">
+            LIVE SUPABASE MODE · SIGN-IN REQUIRED
+          </span>
           <h3>Sign in to view live Supabase Agri harvest records.</h3>
           <p>
-            Live database mode is active. Sign in with a Coordinator account to
-            verify pending farmer submissions, or sign in with a Processor
-            account to browse verified harvests. Demo records are never mixed
-            with live records.
+            Live database mode is active. Sign in with an Admin account to
+            verify pending farmer submissions, or sign in with a Market or
+            Farmer account to browse verified harvests. Demo records are never
+            mixed with live records.
           </p>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <Link href="/login" className="button">
@@ -148,9 +203,12 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
     const rejectedListings = liveHarvests.filter(
       (item) => item.status === "rejected",
     );
-    // Marketplace table only shows verified/published ('available') listings
     const publishedListings = liveHarvests.filter(
-      (item) => item.status === "available",
+      (item) =>
+        item.status === "available" ||
+        item.status === "partially_allocated" ||
+        item.status === "fully_allocated" ||
+        item.status === "delivered",
     );
 
     const filteredLive = publishedListings.filter(
@@ -166,7 +224,7 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
 
     return (
       <>
-        {!compact && isCoordinator && (
+        {!compact && isAdminLive && (
           <div
             style={{
               margin: "0 24px 24px",
@@ -188,7 +246,7 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
             >
               <div>
                 <p className="eyebrow">
-                  AUTHORIZED COORDINATOR VERIFICATION QUEUE · RPC:
+                  AUTHORIZED ADMIN VERIFICATION QUEUE · RPC:
                   review_harvest_listing
                 </p>
                 <h3>
@@ -247,8 +305,7 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
 
             {pendingListings.length === 0 ? (
               <p className="muted" style={{ fontSize: 13 }}>
-                No harvest listings are currently awaiting coordinator
-                verification.
+                No harvest listings are currently awaiting Admin verification.
               </p>
             ) : (
               <div
@@ -285,12 +342,14 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
                           {item.crop} — {item.quantity_kg.toLocaleString()} kg @{" "}
                           {money(item.asking_price_php_per_kg)}/kg
                         </strong>
-                        <p className="muted" style={{ fontSize: 12, marginTop: 3 }}>
+                        <p
+                          className="muted"
+                          style={{ fontSize: 12, marginTop: 3 }}
+                        >
                           Location: <strong>{item.barangay}</strong>,{" "}
                           <strong>{item.municipality}</strong> · Harvested:{" "}
                           {item.harvest_date} · Storage:{" "}
-                          {item.storage_condition} · Farmer ID:{" "}
-                          <code>{item.farmer_id.slice(0, 8)}…</code>
+                          {item.storage_condition}
                         </p>
                       </div>
                       <span className="pill amber">
@@ -325,7 +384,7 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
                         className="button"
                         disabled={reviewingId === item.id}
                         onClick={() =>
-                          void handleCoordinatorDecision(item.id, "available")
+                          void handleAdminLiveDecision(item.id, "available")
                         }
                       >
                         {reviewingId === item.id
@@ -337,7 +396,7 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
                         className="button secondary"
                         disabled={reviewingId === item.id}
                         onClick={() =>
-                          void handleCoordinatorDecision(item.id, "rejected")
+                          void handleAdminLiveDecision(item.id, "rejected")
                         }
                       >
                         ✕ Reject
@@ -354,32 +413,6 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
                 <strong>{rejectedListings.length}</strong>
               </p>
             )}
-          </div>
-        )}
-
-        {!compact && !isCoordinator && (
-          <div
-            style={{
-              margin: "0 24px 16px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <span className="pill green">
-              LIVE SUPABASE MARKETPLACE · VERIFIED LISTINGS ONLY (status =
-              available)
-            </span>
-            <button
-              type="button"
-              className="button secondary"
-              disabled={harvestsLoading}
-              onClick={() => void refreshLiveHarvests()}
-            >
-              {harvestsLoading ? "Refreshing…" : "↻ Refresh live listings"}
-            </button>
           </div>
         )}
 
@@ -446,9 +479,9 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
                   <tr>
                     <th>Crop / Listing</th>
                     <th>Municipality / Storage</th>
-                    <th>Available Volume</th>
+                    <th>Inventory (Total / Rem.)</th>
                     <th>Asking Price</th>
-                    <th>Coordinator Review</th>
+                    <th>Admin Verification</th>
                     <th>Outreach Priority</th>
                   </tr>
                 </thead>
@@ -466,8 +499,8 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
                             <span>
                               <strong>{harvest.crop}</strong>
                               <small>
-                                Harvested {harvest.harvest_date} · ID{" "}
-                                {harvest.id.slice(0, 8)}
+                                {harvest.quality_grade ?? "Grade A"} · Harvested{" "}
+                                {harvest.harvest_date}
                               </small>
                             </span>
                           </div>
@@ -480,9 +513,13 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
                         </td>
                         <td>
                           <strong>
-                            {harvest.quantity_kg.toLocaleString()}
+                            {(
+                              harvest.remaining_kg ?? harvest.quantity_kg
+                            ).toLocaleString()}
                           </strong>{" "}
-                          <span className="muted">kg</span>
+                          <span className="muted">
+                            / {harvest.quantity_kg.toLocaleString()} kg
+                          </span>
                         </td>
                         <td>
                           <strong>
@@ -492,13 +529,8 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
                         </td>
                         <td>
                           <span className="pill green">
-                            ✓ Verified & published (available)
+                            ✓ Verified ({harvest.status})
                           </span>
-                          {!!harvest.review_notes && (
-                            <small className="table-subtext">
-                              {harvest.review_notes}
-                            </small>
-                          )}
                         </td>
                         <td>
                           <span
@@ -524,8 +556,8 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
               <div className="empty-state">
                 <h3>No verified harvests match your filters.</h3>
                 <p>
-                  Only coordinator-verified listings (<code>status = available</code>)
-                  appear in the Harvest Exchange marketplace.
+                  Only Admin-verified listings appear in the Harvest Exchange
+                  marketplace.
                 </p>
                 {(search !== "" ||
                   municipality !== "All municipalities" ||
@@ -543,27 +575,13 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
                 )}
               </div>
             )}
-
-            <div className="table-foot">
-              <span>
-                Showing{" "}
-                {compact
-                  ? Math.min(filteredLive.length, 4)
-                  : filteredLive.length}{" "}
-                of {publishedListings.length} verified live listings
-              </span>
-              <span>
-                Live Supabase Agri · Pending and rejected listings are excluded
-                from the processor marketplace
-              </span>
-            </div>
           </>
         )}
       </>
     );
   }
 
-  // DEMO MODE: isolated sample listings
+  // DEMO MODE: isolated sample listings with live multi-market inventory accounting
   const filteredDemo = demoHarvests.filter(
     (harvest) =>
       `${harvest.crop} ${harvest.farmer} ${harvest.municipality} ${harvest.barangay}`
@@ -606,73 +624,198 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
           </select>
         </div>
       )}
+
+      {!compact && !!reviewNotice && (
+        <p
+          role="status"
+          style={{
+            margin: "0 24px 12px",
+            background: "var(--soft-celery)",
+            border: "1px solid var(--bright-nori)",
+            color: "var(--bush)",
+            padding: "10px 14px",
+            borderRadius: 10,
+            fontWeight: 700,
+            fontSize: 13,
+          }}
+        >
+          {reviewNotice}
+        </p>
+      )}
+      {!compact && !!reviewError && (
+        <p
+          role="alert"
+          style={{
+            margin: "0 24px 12px",
+            background: "#FDF0EE",
+            border: "1px solid #E8B9B3",
+            color: "#942E24",
+            padding: "10px 14px",
+            borderRadius: 10,
+            fontWeight: 700,
+            fontSize: 13,
+          }}
+        >
+          {reviewError}
+        </p>
+      )}
+
       <div className="table-scroll">
         <table>
           <caption className="sr-only">
             SMART-ANI demo harvest listings. Priority is farmer selected;
-            verification badges are illustrative.
+            verification and inventory columns track real-time demo allocations.
           </caption>
           <thead>
             <tr>
               <th>Crop / Grower</th>
               <th>Municipality / Storage</th>
-              <th>Available Volume</th>
+              <th>Inventory (Rem. / Total)</th>
               <th>Asking Price</th>
-              <th>Coordinator Review</th>
-              <th>Outreach Priority</th>
+              <th>Admin Verification</th>
+              <th>Outreach Priority & Advisory</th>
             </tr>
           </thead>
           <tbody>
             {(compact ? filteredDemo.slice(0, 4) : filteredDemo).map(
-              (harvest) => (
-                <tr key={harvest.id}>
-                  <td>
-                    <div className="crop-cell">
-                      <span className={`crop-mark ${harvest.color}`}>
-                        {harvest.mark}
-                      </span>
-                      <span>
-                        <strong>{harvest.crop}</strong>
-                        <small>
-                          {harvest.farmer} · {harvest.variety}
+              (harvest) => {
+                const urgency = evaluateDemoSpoilageUrgency(harvest);
+                return (
+                  <tr key={harvest.id}>
+                    <td>
+                      <div className="crop-cell">
+                        <span className={`crop-mark ${harvest.color}`}>
+                          {harvest.mark}
+                        </span>
+                        <span>
+                          <strong>{harvest.crop}</strong>
+                          <small>
+                            {harvest.farmer} · {harvest.variety} ·{" "}
+                            {harvest.qualityGrade}
+                          </small>
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <strong>{harvest.municipality}</strong>
+                      <small className="table-subtext">
+                        {harvest.barangay} · {harvest.storage}
+                      </small>
+                      {harvest.gpsLocation && (
+                        <small
+                          style={{
+                            display: "block",
+                            fontSize: 10,
+                            color: "var(--maximum-green)",
+                            fontWeight: 700,
+                            marginTop: 2,
+                          }}
+                        >
+                          📍 GPS: {harvest.gpsLocation.latitude.toFixed(4)}° N,{" "}
+                          {harvest.gpsLocation.longitude.toFixed(4)}° E
                         </small>
+                      )}
+                    </td>
+                    <td>
+                      <strong>{harvest.remainingKg.toLocaleString()}</strong>{" "}
+                      <span className="muted">
+                        / {harvest.quantity.toLocaleString()} kg
                       </span>
-                    </div>
-                  </td>
-                  <td>
-                    <strong>{harvest.municipality}</strong>
-                    <small className="table-subtext">
-                      {harvest.barangay} · {harvest.storage}
-                    </small>
-                  </td>
-                  <td>
-                    <strong>{harvest.quantity.toLocaleString()}</strong>{" "}
-                    <span className="muted">kg</span>
-                  </td>
-                  <td>
-                    <strong>{money(harvest.price)}</strong>
-                    <span className="muted"> / kg</span>
-                  </td>
-                  <td>
-                    <span
-                      className={`pill ${
-                        harvest.verified ? "green" : "subtle"
-                      }`}
-                    >
-                      {harvest.verified
-                        ? "✓ Coordinator verified (demo)"
-                        : "◷ Pending review (demo)"}
-                    </span>
-                  </td>
-                  <td>
-                    <span
-                      className={`pill ${harvest.priority ? "amber" : "green"}`}
-                    >
-                      {harvest.priority ? "Priority outreach" : "Standard"}
-                    </span>
-                  </td>
-                </tr>
-              ),
+                      <small className="table-subtext">
+                        Offered: {harvest.earmarkedKg} kg · Reserved:{" "}
+                        {harvest.reservedKg} kg · Delivered:{" "}
+                        {harvest.deliveredKg} kg
+                      </small>
+                    </td>
+                    <td>
+                      <strong>{money(harvest.price)}</strong>
+                      <span className="muted"> / kg</span>
+                    </td>
+                    <td>
+                      <span
+                        className={`pill ${
+                          harvest.verified ? "green" : "subtle"
+                        }`}
+                      >
+                        {harvest.verified
+                          ? "✓ Verified listing"
+                          : "◷ Pending review"}
+                      </span>
+                      {!compact &&
+                        activeDemoRole === "admin" &&
+                        !harvest.verified && (
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              marginTop: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <button
+                              type="button"
+                              className="button"
+                              style={{
+                                padding: "4px 10px",
+                                fontSize: 11,
+                              }}
+                              onClick={() =>
+                                handleAdminDemoDecision(harvest.id, "available")
+                              }
+                            >
+                              ✓ Approve {harvest.id}
+                            </button>
+                            <button
+                              type="button"
+                              className="button secondary"
+                              style={{
+                                padding: "4px 10px",
+                                fontSize: 11,
+                              }}
+                              onClick={() =>
+                                handleAdminDemoDecision(harvest.id, "rejected")
+                              }
+                            >
+                              ✕ Reject
+                            </button>
+                          </div>
+                        )}
+                    </td>
+                    <td>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 5,
+                          flexWrap: "wrap",
+                          alignItems: "center",
+                        }}
+                      >
+                        <span
+                          className={`pill ${harvest.priority ? "amber" : "green"}`}
+                        >
+                          {harvest.priority ? "Priority outreach" : "Standard"}
+                        </span>
+                        {urgency.level === "high" && (
+                          <span
+                            className="pill"
+                            style={{
+                              backgroundColor: urgency.badgeText.includes("CRITICAL") ? "#FDF0EE" : "#FEF7E6",
+                              color: urgency.badgeText.includes("CRITICAL") ? "#B42318" : "#B54708",
+                              border: `1px solid ${urgency.badgeText.includes("CRITICAL") ? "#FDA29B" : "#FEDF89"}`,
+                              fontSize: 10,
+                              fontWeight: 800,
+                            }}
+                          >
+                            {urgency.badgeText.includes("CRITICAL") ? "⚠️ " : "◷ "}
+                            {urgency.badgeText}
+                          </span>
+                        )}
+                      </div>
+                      <small className="table-subtext">{urgency.label}</small>
+                    </td>
+                  </tr>
+                );
+              },
             )}
           </tbody>
         </table>
@@ -700,8 +843,8 @@ export function HarvestTable({ compact = false }: { compact?: boolean }) {
           {demoHarvests.length} sample listings
         </span>
         <span>
-          Outreach priority is farmer-selected · Coordinator verification is
-          illustrative in Demo Preview
+          Spoilage urgency is advisory · Remaining stock updates automatically
+          on offer, reservation, and delivery confirmation
         </span>
       </div>
     </>

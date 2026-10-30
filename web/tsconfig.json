@@ -7,6 +7,7 @@
     "strict": true,
     "types": ["node", "react", "react-dom"],
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

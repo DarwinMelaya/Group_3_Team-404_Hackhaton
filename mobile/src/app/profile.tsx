@@ -1,3 +1,4 @@
+import { Link, type Href } from "expo-router";
 import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import {
@@ -20,6 +21,9 @@ export default function Profile() {
     profile,
     authReady,
     authError,
+    activeRole,
+    activeMarket,
+    activeFarmer,
     signIn,
     signUp,
     signOut,
@@ -29,7 +33,7 @@ export default function Profile() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [municipality, setMunicipality] = useState<string>("Boac");
+  const [municipality, setMunicipality] = useState<string>("Santa Cruz");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState("");
   const [notice, setNotice] = useState("");
@@ -91,8 +95,40 @@ export default function Profile() {
     <Page>
       <Heading
         title="My profile"
-        description="SMART-ANI farmer authentication & workspace settings for Marinduque smallholder growers."
+        description="SMART-ANI authentication & workspace settings for Marinduque agricultural exchange."
       />
+
+      <View style={styles.card}>
+        <Text style={styles.sectionLabel}>CURRENT APP ROLE & IDENTITY</Text>
+        <View style={{ gap: 10 }}>
+          <View>
+            <Text style={styles.heading}>
+              {activeRole === "market" ? "🏪 Market Buyer Role" : "🌾 Farmer Role"}
+            </Text>
+            <Text style={styles.subtitle}>
+              {activeRole === "market"
+                ? `Active account: ${activeMarket?.name ?? "Market Buyer"} (${activeMarket?.verificationStatus ?? "verified"})`
+                : `Active account: ${activeFarmer?.name ?? "Kuya Dante"} (${activeFarmer?.municipality ?? "Santa Cruz"})`}
+            </Text>
+          </View>
+          <Link href={"/welcome" as Href} asChild>
+            <Pressable
+              style={[
+                styles.button,
+                {
+                  backgroundColor: colors.surfaceCelery,
+                  borderColor: colors.venusFlytrap,
+                  paddingVertical: 10,
+                },
+              ]}
+            >
+              <Text style={{ color: colors.bush, fontWeight: "800", fontSize: 13 }}>
+                ⇄ Switch Role / Choose Account
+              </Text>
+            </Pressable>
+          </Link>
+        </View>
+      </View>
 
       {isConfigured && (
         <View style={styles.card}>
@@ -239,17 +275,19 @@ export default function Profile() {
             </Text>
           </Pressable>
           <Text style={styles.subtitle}>
-            New accounts automatically receive the database-enforced default
-            role (farmer). Coordinator and processor roles are assigned only by
-            authorized administrators.
+            New Farmer accounts automatically receive the database-enforced
+            default role (farmer). Market accounts register on the Market Web
+            Portal and require Admin verification.
           </Text>
         </View>
       ) : (
         <View style={styles.card}>
-          <Text style={styles.badge}>DEMO PROFILE · NOT SIGNED IN</Text>
+          <Text style={styles.badge}>DEMO PROFILE · FARMER ROLE</Text>
           <Text style={styles.heading}>Marinduque smallholder farmer</Text>
           <Text style={styles.subtitle}>
             Platform: SMART-ANI (Team 404: Sleep Not Found){"\n"}
+            Official Roles: Farmer, Market (Public Markets, Cooperatives,
+            Processors), Admin{"\n"}
             Coverage: Boac, Mogpog, Santa Cruz, Torrijos, Buenavista, Gasan{"\n"}
             Supported Crops: Banana, Arrowroot (uraro), Cassava, Camote,
             Coconut, Vegetables
@@ -285,13 +323,14 @@ export default function Profile() {
           },
         ]}
       >
-        <Text style={styles.sectionLabel}>WORKSPACE & SECURITY BOUNDARIES</Text>
-        <Text style={styles.heading}>Role & verification protection</Text>
+        <Text style={styles.sectionLabel}>3-ROLE SECURITY & GOVERNANCE</Text>
+        <Text style={styles.heading}>
+          Farmer, Market & Admin protection boundaries
+        </Text>
         <Text style={styles.subtitle}>
-          In Live Supabase Mode, farmer submissions always start as{" "}
-          pending_verification and require Barangay Coordinator approval via
-          review_harvest_listing before appearing in the Processor Harvest
-          Exchange. In Demo Mode, records stay in this browser only.
+          SMART-ANI enforces three roles: Farmer, Market, and Admin. Farmers
+          can divide a single harvest across multiple verified Markets without
+          over-allocating, while Markets confirm actual received quantities.
         </Text>
       </View>
     </Page>

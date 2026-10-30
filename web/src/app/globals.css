@@ -29,8 +29,12 @@
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
+  padding: 0;
+  max-width: 100vw;
+  overflow-x: hidden;
   background: var(--cream);
   color: var(--ink);
   font-family: var(--font-sans);
@@ -1438,6 +1442,14 @@ select {
     padding: 0 16px;
   }
   .topbar-right .avatar {
+    display: none;
+  }
+  .topbar-right {
+    gap: 6px;
+    min-width: 0;
+  }
+  .topbar-right .demo-chip,
+  .topbar-role-controls select[aria-label="Active market account"] {
     display: none;
   }
   .demo-notice {

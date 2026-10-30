@@ -1,12 +1,8 @@
+"use client";
+
 import Link from "next/link";
-import {
-  harvests,
-  municipalities,
-  priorityCount,
-  requirements,
-  totalKg,
-  verifiedCount,
-} from "../lib/demo";
+import { municipalities } from "../lib/demo";
+import { usePortalAuth } from "../lib/portal-auth";
 import { HarvestTable } from "./harvest-table";
 import { Icon, type IconName } from "./icon";
 
@@ -46,6 +42,42 @@ function FieldIllustration() {
 }
 
 export function Dashboard() {
+  const {
+    activeDemoRole,
+    demoHarvests,
+    demoDemands,
+    demoAllocations,
+    demoAccounts,
+  } = usePortalAuth();
+
+  const totalSupplyKg = demoHarvests.reduce((sum, h) => sum + h.quantity, 0);
+  const remainingSupplyKg = demoHarvests.reduce(
+    (sum, h) => sum + h.remainingKg,
+    0,
+  );
+  const totalAllocatedKg = demoHarvests.reduce(
+    (sum, h) => sum + h.allocatedKg,
+    0,
+  );
+  const totalDeliveredKg = demoHarvests.reduce(
+    (sum, h) => sum + h.deliveredKg,
+    0,
+  );
+  const totalDemandKg = demoDemands.reduce(
+    (sum, d) => sum + d.requiredQuantityKg,
+    0,
+  );
+  const remainingDemandKg = demoDemands.reduce(
+    (sum, d) => sum + d.remainingDemandKg,
+    0,
+  );
+  const verifiedMarketsCount = demoAccounts.filter(
+    (a) => a.role === "market" && a.marketVerificationStatus === "verified",
+  ).length;
+  const totalMarketsCount = demoAccounts.filter(
+    (a) => a.role === "market",
+  ).length;
+
   const metrics: {
     label: string;
     value: string;
@@ -53,27 +85,27 @@ export function Dashboard() {
     icon: IconName;
   }[] = [
     {
-      label: "Aggregated sample supply",
-      value: `${totalKg.toLocaleString()} kg`,
-      foot: `Across ${harvests.length} sample listings in 6 municipalities`,
+      label: "Remaining farmer supply",
+      value: `${remainingSupplyKg.toLocaleString()} / ${totalSupplyKg.toLocaleString()} kg`,
+      foot: `Across ${demoHarvests.length} harvest listings in 6 municipalities`,
       icon: "leaf",
     },
     {
-      label: "Advisory priority outreach",
-      value: String(priorityCount).padStart(2, "0"),
-      foot: "Farmer-flagged for priority buyer matching",
+      label: "Remaining market demand",
+      value: `${remainingDemandKg.toLocaleString()} / ${totalDemandKg.toLocaleString()} kg`,
+      foot: `Across ${demoDemands.length} active market crop requirements`,
       icon: "requests",
     },
     {
-      label: "Coordinator-reviewed (demo)",
-      value: `${verifiedCount} / ${harvests.length}`,
-      foot: "Sample verification status preview",
+      label: "Offered & reserved",
+      value: `${totalAllocatedKg.toLocaleString()} kg`,
+      foot: `${demoAllocations.length} active supply allocations tracked`,
       icon: "layers",
     },
     {
-      label: "Processor bulk requests",
-      value: String(requirements.length).padStart(2, "0"),
-      foot: "Illustrative Marinduque processing demand",
+      label: "Confirmed delivered",
+      value: `${totalDeliveredKg.toLocaleString()} kg`,
+      foot: `${verifiedMarketsCount} / ${totalMarketsCount} Markets verified by Admin`,
       icon: "pin",
     },
   ];
@@ -83,17 +115,19 @@ export function Dashboard() {
       <div className="page-heading">
         <div>
           <p className="eyebrow">
-            SMART-ANI · MUNICIPAL SUPPLY AGGREGATOR DASHBOARD
+            SMART-ANI · DEMAND-DRIVEN EXCHANGE ({activeDemoRole.toUpperCase()}{" "}
+            VIEW)
           </p>
           <h1>Good things are growing.</h1>
           <p>
-            Coordinating smallholder harvests, barangay coordinators, and
-            value-add processors across Marinduque.
+            Preventing post-harvest crop spoilage by connecting Farmers,
+            verified Markets (Public Markets, Cooperatives, Food Processors,
+            Retailers), and Admins across Marinduque.
           </p>
         </div>
         <div className="heading-actions">
           <Link className="button secondary" href="/supply-pooling">
-            Supply pooling <Icon name="layers" size={16} />
+            Allocate & Match <Icon name="layers" size={16} />
           </Link>
           <Link className="button" href="/harvest-exchange">
             Explore the exchange <Icon name="arrow" size={17} />
@@ -104,25 +138,27 @@ export function Dashboard() {
       <section className="hero">
         <div className="hero-copy">
           <span className="hero-kicker">
-            <span className="status-dot" /> SMART-ANI · POST-HARVEST EXCHANGE &
-            VALUE-ADDITION
+            <span className="status-dot" /> SMART-ANI · FARMER · MARKET · ADMIN
           </span>
           <h2>
             Reduce post-harvest spoilage.
             <br />
-            Unlock value in every harvest.
+            Match every harvest to real market demand.
           </h2>
           <p>
-            Connecting Uraro/Arrowroot, Cassava, Camote, Banana, Coconut, and
-            Vegetable growers with municipal pooling and food processors across
-            Boac, Mogpog, Santa Cruz, Torrijos, Buenavista, and Gasan.
+            A farmer with <strong>100 kg of Banana</strong> can split-allocate{" "}
+            <strong>40 kg to Market 1</strong>,{" "}
+            <strong>35 kg to Market 2</strong>, and{" "}
+            <strong>25 kg to Market 3</strong> — while a Market needing{" "}
+            <strong>100 kg</strong> can receive from multiple farmers with
+            zero over-allocation or double-counting.
           </p>
           <div className="hero-actions">
-            <Link href="/harvest-exchange" className="button light">
-              View available harvests <Icon name="arrow" size={18} />
+            <Link href="/supply-pooling" className="button light">
+              Split-allocate harvests <Icon name="arrow" size={18} />
             </Link>
-            <Link href="/ai-value-add" className="button ghost-light">
-              AI Value-Add Simulator <Icon name="spark" size={17} />
+            <Link href="/processor-requests" className="button ghost-light">
+              Post / View Market Demands <Icon name="requests" size={17} />
             </Link>
           </div>
         </div>
@@ -151,11 +187,11 @@ export function Dashboard() {
         <section className="panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">COORDINATOR & PROCESSOR VIEW</p>
+              <p className="eyebrow">FARMER, MARKET & ADMIN VIEW</p>
               <h2>Harvest exchange preview</h2>
               <p className="muted">
-                Recent sample surplus listings with illustrative verification
-                and farmer outreach priority.
+                Real-time inventory tracking (Remaining vs. Total kg), Admin
+                verification status, and advisory spoilage urgency.
               </p>
             </div>
             <Link href="/harvest-exchange" className="text-link">
@@ -168,22 +204,26 @@ export function Dashboard() {
         <section className="panel regional-panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">MUNICIPAL SUPPLY AGGREGATOR</p>
-              <h2>Supply by municipality</h2>
+              <p className="eyebrow">MUNICIPAL SUPPLY & DEMAND ANALYTICS</p>
+              <h2>Supply vs. Demand by municipality</h2>
               <p className="muted">
-                Sample surplus volume across Marinduque’s 6 municipalities.
+                Remaining harvest supply and open market demand across
+                Marinduque’s 6 municipalities.
               </p>
             </div>
           </div>
           <div className="region-bars">
             {municipalities.map((place) => {
-              const listingItems = harvests.filter(
+              const listingItems = demoHarvests.filter(
                 (harvest) => harvest.municipality === place,
               );
-              const quantity = listingItems.reduce(
-                (sum, harvest) => sum + harvest.quantity,
+              const supplyKg = listingItems.reduce(
+                (sum, harvest) => sum + harvest.remainingKg,
                 0,
               );
+              const demandKg = demoDemands
+                .filter((d) => d.municipality === place)
+                .reduce((sum, d) => sum + d.remainingDemandKg, 0);
               const cropsLabel = listingItems.map((h) => h.crop).join(", ");
               return (
                 <div key={place} className="region-bar-item">
@@ -193,19 +233,24 @@ export function Dashboard() {
                       <small>({cropsLabel || "No sample"})</small>
                     </span>
                     <strong>
-                      {quantity} <small>kg</small>
+                      {supplyKg} <small>kg supply</small> · {demandKg}{" "}
+                      <small>kg demand</small>
                     </strong>
                   </div>
                   <div className="bar-track">
-                    <div style={{ width: `${(quantity / 460) * 100}%` }} />
+                    <div
+                      style={{
+                        width: `${Math.min((supplyKg / 460) * 100, 100)}%`,
+                      }}
+                    />
                   </div>
                 </div>
               );
             })}
           </div>
           <p className="panel-note">
-            Illustrative sample quantities only. Same-municipality pooling is
-            enforced in the prepared Phase 2 database schema.
+            Remaining harvest = Total harvest − Allocated (Offered + Reserved) −
+            Confirmed Delivered.
           </p>
         </section>
       </div>

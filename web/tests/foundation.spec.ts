@@ -26,7 +26,7 @@ test("portal routes, branding, demo boundaries, and unknown-route handling", asy
   ]) {
     await page
       .getByRole("navigation", { name: "Main navigation" })
-      .getByRole("link", { name: label, exact: true })
+      .locator(`a[href="/${path}"]`)
       .click();
     await expect(page).toHaveURL(new RegExp(`/${path}$`));
     await expect(
@@ -85,7 +85,7 @@ test("portal renders at desktop and mobile sizes with working mobile navigation"
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page
     .getByRole("navigation", { name: "Main navigation" })
-    .getByRole("link", { name: "Harvest Exchange", exact: true })
+    .locator('a[href="/harvest-exchange"]')
     .click();
   await expect(page).toHaveURL(/\/harvest-exchange$/);
   await expect(
@@ -215,4 +215,118 @@ test("farmer reports broken storage without overwriting existing records", async
   await expect(
     page.getByRole("button", { name: "Save demo harvest" }),
   ).toBeDisabled();
+});
+
+test("end-to-end 3-role workflow: unverified market guard, admin verification, 100kg -> 40/35/25kg split allocation, over-allocation block, reservation, delivery confirmation, and audit trail", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+
+  // 1. Go to Processor Requests (Market Demand Board) & test unverified Market guard
+  await page.goto("/processor-requests");
+  await page
+    .getByLabel("Posting market account")
+    .selectOption("market-gasan-unverified");
+  await page.getByRole("button", { name: "5. Suriin (Review)" }).click();
+  await page.getByRole("button", { name: /I-post ang Pangangailangan/ }).click();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Unverified Market accounts" }),
+  ).toContainText("Unverified Market accounts");
+
+  // 2. Go to Transactions, verify non-admin cannot verify market, then switch to ADMIN and verify market
+  await page.goto("/transactions");
+  await page
+    .getByRole("button", { name: "✓ Verify Market (market-gasan-unverified)" })
+    .click();
+  await expect(
+    page
+      .getByRole("alert")
+      .filter({ hasText: "Unauthorized: Only an Admin account can verify" }),
+  ).toContainText("Unauthorized: Only an Admin account can verify");
+
+  await page.getByLabel("Active workspace role").selectOption("admin");
+  await page
+    .getByRole("button", { name: "✓ Verify Market (market-gasan-unverified)" })
+    .click();
+  await expect(page.getByRole("status")).toContainText("verified");
+
+  // 3. Go to Supply Pooling and execute the 100 kg Banana -> 40 kg + 35 kg + 25 kg split scenario
+  await page.goto("/supply-pooling");
+  await expect(page.getByTestId("selected-harvest-remaining-kg")).toHaveText(
+    "100 kilo (kg)",
+  );
+
+  await page
+    .getByRole("button", { name: /1-Click Offer: 40 kg Saging/ })
+    .click();
+  await expect(page.getByTestId("selected-harvest-remaining-kg")).toHaveText(
+    "60 kilo (kg)",
+  );
+
+  await page
+    .getByRole("button", {
+      name: /1-Click Offer: 35 kg Saging/,
+    })
+    .click();
+  await expect(page.getByTestId("selected-harvest-remaining-kg")).toHaveText(
+    "25 kilo (kg)",
+  );
+
+  await page
+    .getByRole("button", {
+      name: /1-Click Offer: 25 kg Saging/,
+    })
+    .click();
+  await expect(page.getByTestId("selected-harvest-remaining-kg")).toHaveText(
+    "0 kilo (kg)",
+  );
+
+  // 4. Verify +1 kg over-allocation beyond 100 kg is blocked
+  await page.getByLabel("Allocation quantity (kg)").fill("1");
+  await page.getByRole("button", { name: /Magpadala ng Alok/ }).click();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Over-allocation blocked" }),
+  ).toContainText("Over-allocation blocked");
+
+  // 5. Each Market accepts its respective offer (40 kg, 35 kg, 25 kg)
+  await page
+    .getByRole("button", { name: /Tanggapin & Ireserba \(40/ })
+    .click();
+  await page
+    .getByRole("button", { name: /Tanggapin & Ireserba \(35/ })
+    .click();
+  await page
+    .getByRole("button", { name: /Tanggapin & Ireserba \(25/ })
+    .click();
+
+  // Remaining farmer stock is still 0 kg (no double-counting when moving from offered to reserved)
+  await expect(page.getByTestId("selected-harvest-remaining-kg")).toHaveText(
+    "0 kilo (kg)",
+  );
+
+  // 6. Confirm deliveries in Transactions and verify audit trail
+  await page.goto("/transactions");
+  await page
+    .getByRole("button", { name: /Confirm Delivery \(40 kg\)/ })
+    .click();
+  await page
+    .getByRole("button", { name: /Confirm Delivery \(35 kg\)/ })
+    .click();
+  await page
+    .getByRole("button", { name: /Confirm Delivery \(25 kg\)/ })
+    .click();
+
+  await expect(
+    page.getByTestId("tx-allocation-ALLOC-001"),
+  ).toContainText("DELIVERED");
+  await expect(
+    page.getByTestId("tx-allocation-ALLOC-002"),
+  ).toContainText("DELIVERED");
+  await expect(
+    page.getByTestId("tx-allocation-ALLOC-003"),
+  ).toContainText("DELIVERED");
+  await expect(page.getByText(/confirm_allocation_delivery/).first()).toBeVisible();
+
+  expect(errors).toEqual([]);
 });

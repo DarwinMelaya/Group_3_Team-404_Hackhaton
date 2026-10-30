@@ -1,11 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Dashboard } from "../../components/dashboard";
-import {
-  SectionContent,
-  sections,
-  type Section,
-} from "../../components/sections";
+import { SectionContent } from "../../components/sections";
+import { sections, type Section } from "../../lib/sections";
 
 export function generateStaticParams() {
   return Object.keys(sections).map((section) => ({ section }));

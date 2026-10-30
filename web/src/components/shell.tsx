@@ -3,21 +3,101 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { type RoleType } from "../lib/demo";
 import { usePortalAuth } from "../lib/portal-auth";
-import { Icon, type IconName } from "./icon";
+import { Icon } from "./icon";
 
-const navigation: { href: string; label: string; icon: IconName }[] = [
-  { href: "/dashboard", label: "Dashboard", icon: "grid" },
-  { href: "/harvest-exchange", label: "Harvest Exchange", icon: "leaf" },
-  { href: "/supply-pooling", label: "Supply Pooling", icon: "layers" },
-  {
-    href: "/processor-requests",
-    label: "Processor Requests",
-    icon: "requests",
-  },
-  { href: "/ai-value-add", label: "AI Value-Add Analysis", icon: "spark" },
-  { href: "/transactions", label: "Transactions", icon: "swap" },
-];
+function getRoleNavigation(role: RoleType) {
+  if (role === "market") {
+    return [
+      { href: "/dashboard", label: "Dashboard", icon: "grid" as const },
+      {
+        href: "/processor-requests",
+        label: "Post Demand",
+        icon: "requests" as const,
+      },
+      {
+        href: "/supply-pooling",
+        label: "Farmer Offers",
+        icon: "layers" as const,
+      },
+      {
+        href: "/transactions",
+        label: "Deliveries & Receipts",
+        icon: "swap" as const,
+      },
+      {
+        href: "/harvest-exchange",
+        label: "Town Supply Board",
+        icon: "leaf" as const,
+      },
+      {
+        href: "/ai-value-add",
+        label: "Processing Analysis",
+        icon: "spark" as const,
+      },
+    ];
+  }
+  if (role === "admin") {
+    return [
+      { href: "/dashboard", label: "Dashboard", icon: "grid" as const },
+      {
+        href: "/transactions",
+        label: "Users & Verification",
+        icon: "swap" as const,
+      },
+      {
+        href: "/harvest-exchange",
+        label: "Harvests & Town Supply",
+        icon: "leaf" as const,
+      },
+      {
+        href: "/supply-pooling",
+        label: "Supply & Batch Pooling",
+        icon: "layers" as const,
+      },
+      {
+        href: "/processor-requests",
+        label: "Market Demands",
+        icon: "requests" as const,
+      },
+      {
+        href: "/ai-value-add",
+        label: "Reports & Facilities",
+        icon: "spark" as const,
+      },
+    ];
+  }
+  // Default: Farmer
+  return [
+    { href: "/dashboard", label: "Home", icon: "grid" as const },
+    {
+      href: "/harvest-exchange",
+      label: "My Harvest Listings",
+      icon: "leaf" as const,
+    },
+    {
+      href: "/supply-pooling",
+      label: "Find Markets & Allocate",
+      icon: "layers" as const,
+    },
+    {
+      href: "/transactions",
+      label: "My Deliveries & Audit",
+      icon: "swap" as const,
+    },
+    {
+      href: "/ai-value-add",
+      label: "Profit Calculator & Guides",
+      icon: "spark" as const,
+    },
+    {
+      href: "/processor-requests",
+      label: "Market Demands",
+      icon: "requests" as const,
+    },
+  ];
+}
 
 export function Brand() {
   return (
@@ -37,14 +117,32 @@ export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const { isConfigured, mode, setMode, session, profile, signOut } =
-    usePortalAuth();
-
-  if (pathname === "/login") return <>{children}</>;
-  const current =
-    navigation.find((item) => item.href === pathname)?.label ?? "Workspace";
+  const {
+    isConfigured,
+    mode,
+    setMode,
+    session,
+    profile,
+    signOut,
+    activeDemoRole,
+    setActiveDemoRole,
+    activeDemoMarketId,
+    setActiveDemoMarketId,
+    activeDemoMarket,
+    demoAccounts,
+    resetDemoWorkspace,
+  } = usePortalAuth();
 
   const isLiveAuthenticated = mode === "live" && !!session && !!profile;
+  const activeNavRole: RoleType = isLiveAuthenticated
+    ? (profile.role as RoleType)
+    : activeDemoRole;
+  const currentNav = getRoleNavigation(activeNavRole);
+
+  if (pathname === "/login" || pathname === "/admin/login") return <>{children}</>;
+  const current =
+    currentNav.find((item) => item.href === pathname)?.label ?? "Workspace";
+  const marketAccounts = demoAccounts.filter((a) => a.role === "market");
 
   async function handleSignOut() {
     await signOut();
@@ -74,11 +172,11 @@ export function Shell({ children }: { children: ReactNode }) {
           <span className="status-dot" />{" "}
           {isLiveAuthenticated
             ? `LIVE AGRI · ${profile.role.toUpperCase()}`
-            : "MARINDUQUE · 6 MUNICIPALITIES"}
+            : `MARINDUQUE · ROLE: ${activeDemoRole.toUpperCase()}`}
         </div>
-        <p className="nav-label">MUNICIPAL WORKSPACE</p>
+        <p className="nav-label">DEMAND-DRIVEN WORKSPACE</p>
         <nav aria-label="Main navigation">
-          {navigation.map((item) => (
+          {currentNav.map((item) => (
             <Link
               onClick={() => setOpen(false)}
               className={`nav-item ${pathname === item.href ? "active" : ""}`}
@@ -95,10 +193,10 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="sidebar-bottom">
           <div className="mission-card">
             <Icon name="leaf" size={24} />
-            <h3>From Surplus to Value-Add</h3>
+            <h3>Prevent Crop Spoilage</h3>
             <p>
-              Coordinating farmers, barangay coordinators, and processors across
-              Marinduque.
+              Connecting Farmers, verified Markets (Public Markets,
+              Cooperatives, Food Processors), and Admins across Marinduque.
             </p>
             <span>TEAM 404: SLEEP NOT FOUND ↗</span>
           </div>
@@ -129,10 +227,14 @@ export function Shell({ children }: { children: ReactNode }) {
             </button>
           ) : (
             <Link className="profile-link" href="/login">
-              <span className="avatar">SA</span>
+              <span className="avatar">
+                {activeDemoRole.slice(0, 2).toUpperCase()}
+              </span>
               <span>
                 <strong>Demo workspace</strong>
-                <small>Coordinator / processor preview</small>
+                <small>
+                  Active role: {activeDemoRole.toUpperCase()}
+                </small>
               </span>
               <Icon name="logout" size={18} />
             </Link>
@@ -165,6 +267,65 @@ export function Shell({ children }: { children: ReactNode }) {
             <span className="location">
               <Icon name="pin" size={15} /> Marinduque, Philippines
             </span>
+            {mode === "demo" && (
+              <div
+                className="topbar-role-controls"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  flexWrap: "wrap",
+                }}
+              >
+                <select
+                  aria-label="Active workspace role"
+                  value={activeDemoRole}
+                  onChange={(e) =>
+                    setActiveDemoRole(e.target.value as RoleType)
+                  }
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    padding: "5px 9px",
+                    borderRadius: 999,
+                    border: "1px solid var(--maximum-green)",
+                    background: "var(--surface-soft)",
+                    color: "var(--bush)",
+                  }}
+                >
+                  <option value="market">Role: MARKET</option>
+                  <option value="farmer">Role: FARMER</option>
+                  <option value="admin">Role: ADMIN (Verification & Coordination)</option>
+                </select>
+                {activeDemoRole === "market" && (
+                  <select
+                    aria-label="Active market account"
+                    value={activeDemoMarketId}
+                    onChange={(e) => setActiveDemoMarketId(e.target.value)}
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      padding: "5px 9px",
+                      borderRadius: 999,
+                      border: "1px solid var(--line)",
+                      background: "var(--surface)",
+                      color: "var(--bush)",
+                      maxWidth: 220,
+                    }}
+                  >
+                    {marketAccounts.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.organizationName} (
+                        {m.marketVerificationStatus === "verified"
+                          ? "✓ Verified"
+                          : "◷ Pending"}
+                        )
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
             {isConfigured && (
               <button
                 type="button"
@@ -183,17 +344,50 @@ export function Shell({ children }: { children: ReactNode }) {
             <span className="avatar small">
               {isLiveAuthenticated
                 ? profile.role.slice(0, 2).toUpperCase()
-                : "SA"}
+                : activeDemoRole.slice(0, 2).toUpperCase()}
             </span>
           </div>
         </header>
-        <div className="demo-notice">
-          <span className="status-dot" />{" "}
-          {mode === "live"
-            ? isLiveAuthenticated
-              ? `LIVE SUPABASE MODE (Agri) · Signed in as ${profile.display_name} (${profile.role} · ${profile.municipality}). Database RLS and coordinator verification RPC are active.`
-              : "LIVE SUPABASE MODE (Agri) · Not signed in. Sign in on the Login page with a Coordinator or Processor account, or switch to Demo Preview."
-            : "SMART-ANI Phase 1 Demo · Sample records only. Live Supabase Agri records are isolated from demo mode."}
+        <div
+          className="demo-notice"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <span>
+            <span className="status-dot" />{" "}
+            {mode === "live"
+              ? isLiveAuthenticated
+                ? `LIVE SUPABASE MODE (Agri) · Signed in as ${profile.display_name} (${profile.role.toUpperCase()} · ${profile.municipality}). Database RLS and Admin/Market RPCs are active.`
+                : "LIVE SUPABASE MODE (Agri) · Not signed in. Sign in on the Login page with a Farmer, Market, or Admin account, or switch to Demo Preview."
+              : `SMART-ANI Interactive Demo Mode · Active Role: ${activeDemoRole.toUpperCase()}${
+                  activeDemoRole === "market" && activeDemoMarket
+                    ? ` (${activeDemoMarket.organizationName} · ${activeDemoMarket.marketVerificationStatus})`
+                    : ""
+                } · Live Supabase Agri records are isolated from demo mode.`}
+          </span>
+          {mode === "demo" && (
+            <button
+              type="button"
+              onClick={resetDemoWorkspace}
+              style={{
+                background: "transparent",
+                border: "1px solid var(--bright-nori)",
+                borderRadius: 999,
+                padding: "3px 10px",
+                fontSize: 11,
+                fontWeight: 700,
+                color: "var(--bush)",
+                cursor: "pointer",
+              }}
+            >
+              ↺ Reset Demo Scenario
+            </button>
+          )}
         </div>
         <main id="main-content">{children}</main>
         <footer>

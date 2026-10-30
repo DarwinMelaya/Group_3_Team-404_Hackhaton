@@ -1,14 +1,25 @@
-// SMART-ANI · Phase 2B Web Supabase Auth, PostgREST & Coordinator Verification RPC Client
+// SMART-ANI · Web Portal Supabase Auth, PostgREST & 3-Role (Farmer, Market, Admin) RPC Client
 // Keep free of framework imports so this module can be unit-tested directly with Node.
 
-import { supabaseConfig, type SupabasePublicConfig } from "./supabase-config";
+import { supabaseConfig, type SupabasePublicConfig } from "./supabase-config.ts";
 
-export type SmartAniRole = "farmer" | "processor" | "coordinator" | "admin";
+export type SmartAniRole = "farmer" | "market" | "admin";
+
+export type MarketType =
+  | "public_market"
+  | "wet_market_retailer"
+  | "retail_buyer"
+  | "cooperative"
+  | "food_processor"
+  | "institutional_buyer";
 
 export type HarvestVerificationStatus =
   | "draft"
   | "pending_verification"
   | "available"
+  | "partially_allocated"
+  | "fully_allocated"
+  | "delivered"
   | "rejected"
   | "closed";
 
@@ -17,6 +28,16 @@ export type UserProfile = {
   display_name: string;
   municipality: string;
   role: SmartAniRole;
+  account_status?: "active" | "deactivated_pending_admin_review" | "suspended";
+  market_type?: MarketType | null;
+  organization_name?: string;
+  market_verification_status?:
+    | "not_applicable"
+    | "pending_verification"
+    | "verified"
+    | "rejected"
+    | "suspended";
+  verification_notes?: string;
   created_at: string;
 };
 
@@ -35,6 +56,9 @@ export type LiveHarvestListing = {
   farmer_id: string;
   crop: string;
   quantity_kg: number;
+  unit: string;
+  quality_grade: string;
+  photo_url: string;
   asking_price_php_per_kg: number;
   harvest_date: string;
   municipality: string;
@@ -42,10 +66,64 @@ export type LiveHarvestListing = {
   storage_condition: string;
   outreach_priority: "Standard" | "Priority";
   status: HarvestVerificationStatus;
+  earmarked_kg: number;
+  reserved_kg: number;
+  allocated_kg: number;
+  delivered_kg: number;
+  remaining_kg: number;
   reviewed_by: string | null;
   reviewed_at: string | null;
   review_notes: string;
   created_at: string;
+};
+
+export type LiveMarketDemand = {
+  id: string;
+  market_id: string;
+  crop: string;
+  required_quantity_kg: number;
+  reserved_quantity_kg: number;
+  fulfilled_quantity_kg: number;
+  remaining_demand_kg: number;
+  unit: string;
+  preferred_quality_grade: string;
+  offered_price_php_per_kg: number;
+  municipality: string;
+  barangay: string;
+  delivery_location_text: string;
+  required_by: string;
+  accept_partial: boolean;
+  quality_notes: string;
+  status: "open" | "partially_fulfilled" | "fulfilled" | "cancelled" | "closed";
+  created_at: string;
+};
+
+export type LiveSupplyAllocation = {
+  id: string;
+  harvest_listing_id: string;
+  market_demand_id: string;
+  farmer_id: string;
+  market_id: string;
+  crop: string;
+  allocated_quantity_kg: number;
+  delivered_quantity_kg: number;
+  released_quantity_kg: number;
+  outstanding_quantity_kg: number;
+  agreed_price_php_per_kg: number;
+  status:
+    | "proposed"
+    | "pending_acceptance"
+    | "reserved"
+    | "in_delivery"
+    | "partially_delivered"
+    | "delivered"
+    | "rejected"
+    | "cancelled";
+  offer_notes: string;
+  response_notes: string;
+  offered_at: string;
+  responded_at: string | null;
+  completed_at: string | null;
 };
 
 const VALID_MUNICIPALITIES = new Set([
@@ -152,11 +230,24 @@ function normalizeAuthSession(raw: Record<string, unknown>): SupabaseSession | n
 }
 
 function normalizeLiveListing(raw: Record<string, unknown>): LiveHarvestListing {
+  const qty = Number(raw.quantity_kg ?? 0);
+  const earmarked = Number(raw.earmarked_kg ?? 0);
+  const reserved = Number(raw.reserved_kg ?? 0);
+  const allocated = Number(raw.allocated_kg ?? earmarked + reserved);
+  const delivered = Number(raw.delivered_kg ?? 0);
+  const remaining =
+    raw.remaining_kg !== undefined
+      ? Number(raw.remaining_kg)
+      : Math.max(0, Number((qty - allocated - delivered).toFixed(3)));
+
   return {
     id: String(raw.id ?? ""),
     farmer_id: String(raw.farmer_id ?? ""),
     crop: String(raw.crop ?? ""),
-    quantity_kg: Number(raw.quantity_kg ?? 0),
+    quantity_kg: qty,
+    unit: String(raw.unit ?? "kg"),
+    quality_grade: String(raw.quality_grade ?? "Grade A"),
+    photo_url: String(raw.photo_url ?? ""),
     asking_price_php_per_kg: Number(raw.asking_price_php_per_kg ?? 0),
     harvest_date: String(raw.harvest_date ?? ""),
     municipality: String(raw.municipality ?? ""),
@@ -164,6 +255,11 @@ function normalizeLiveListing(raw: Record<string, unknown>): LiveHarvestListing 
     storage_condition: String(raw.storage_condition ?? ""),
     outreach_priority: raw.outreach_priority === "Priority" ? "Priority" : "Standard",
     status: (raw.status as HarvestVerificationStatus) ?? "pending_verification",
+    earmarked_kg: earmarked,
+    reserved_kg: reserved,
+    allocated_kg: allocated,
+    delivered_kg: delivered,
+    remaining_kg: remaining,
     reviewed_by: typeof raw.reviewed_by === "string" ? raw.reviewed_by : null,
     reviewed_at: typeof raw.reviewed_at === "string" ? raw.reviewed_at : null,
     review_notes: typeof raw.review_notes === "string" ? raw.review_notes : "",
@@ -171,16 +267,86 @@ function normalizeLiveListing(raw: Record<string, unknown>): LiveHarvestListing 
   };
 }
 
+function normalizeLiveDemand(raw: Record<string, unknown>): LiveMarketDemand {
+  const req = Number(raw.required_quantity_kg ?? 0);
+  const res = Number(raw.reserved_quantity_kg ?? 0);
+  const ful = Number(raw.fulfilled_quantity_kg ?? 0);
+  const rem =
+    raw.remaining_demand_kg !== undefined
+      ? Number(raw.remaining_demand_kg)
+      : Math.max(0, Number((req - res - ful).toFixed(3)));
+
+  return {
+    id: String(raw.id ?? ""),
+    market_id: String(raw.market_id ?? ""),
+    crop: String(raw.crop ?? ""),
+    required_quantity_kg: req,
+    reserved_quantity_kg: res,
+    fulfilled_quantity_kg: ful,
+    remaining_demand_kg: rem,
+    unit: String(raw.unit ?? "kg"),
+    preferred_quality_grade: String(raw.preferred_quality_grade ?? "Any"),
+    offered_price_php_per_kg: Number(raw.offered_price_php_per_kg ?? 0),
+    municipality: String(raw.municipality ?? ""),
+    barangay: String(raw.barangay ?? ""),
+    delivery_location_text: String(raw.delivery_location_text ?? ""),
+    required_by: String(raw.required_by ?? ""),
+    accept_partial: Boolean(raw.accept_partial ?? true),
+    quality_notes: String(raw.quality_notes ?? ""),
+    status:
+      (raw.status as LiveMarketDemand["status"]) ?? "open",
+    created_at: String(raw.created_at ?? ""),
+  };
+}
+
+function normalizeLiveAllocation(
+  raw: Record<string, unknown>,
+): LiveSupplyAllocation {
+  const alloc = Number(raw.allocated_quantity_kg ?? 0);
+  const deliv = Number(raw.delivered_quantity_kg ?? 0);
+  const rel = Number(raw.released_quantity_kg ?? 0);
+  const out =
+    raw.outstanding_quantity_kg !== undefined
+      ? Number(raw.outstanding_quantity_kg)
+      : Math.max(0, Number((alloc - deliv - rel).toFixed(3)));
+
+  return {
+    id: String(raw.id ?? ""),
+    harvest_listing_id: String(raw.harvest_listing_id ?? ""),
+    market_demand_id: String(raw.market_demand_id ?? ""),
+    farmer_id: String(raw.farmer_id ?? ""),
+    market_id: String(raw.market_id ?? ""),
+    crop: String(raw.crop ?? ""),
+    allocated_quantity_kg: alloc,
+    delivered_quantity_kg: deliv,
+    released_quantity_kg: rel,
+    outstanding_quantity_kg: out,
+    agreed_price_php_per_kg: Number(raw.agreed_price_php_per_kg ?? 0),
+    status: (raw.status as LiveSupplyAllocation["status"]) ?? "pending_acceptance",
+    offer_notes: String(raw.offer_notes ?? ""),
+    response_notes: String(raw.response_notes ?? ""),
+    offered_at: String(raw.offered_at ?? ""),
+    responded_at: typeof raw.responded_at === "string" ? raw.responded_at : null,
+    completed_at: typeof raw.completed_at === "string" ? raw.completed_at : null,
+  };
+}
+
 export async function fetchOrCreateUserProfile(
   session: SupabaseSession,
-  defaults?: { displayName?: string; municipality?: string },
+  defaults?: {
+    displayName?: string;
+    municipality?: string;
+    accountRole?: "farmer" | "market";
+    marketType?: MarketType;
+    organizationName?: string;
+  },
   config: SupabasePublicConfig = supabaseConfig,
   fetchImpl: typeof fetch = fetch,
 ): Promise<UserProfile> {
   const cfg = requireConfigured(config);
   const queryUrl = `${cfg.url}/rest/v1/profiles?id=eq.${encodeURIComponent(
     session.user.id,
-  )}&select=id,display_name,municipality,role,created_at`;
+  )}&select=*`;
   const getRes = await fetchImpl(queryUrl, {
     method: "GET",
     headers: buildHeaders(cfg.publishableKey, session.access_token),
@@ -205,8 +371,31 @@ export async function fetchOrCreateUserProfile(
     ? defaults!.municipality!
     : "Boac";
 
+  if (defaults?.accountRole === "market") {
+    const rpcRes = await fetchImpl(
+      `${cfg.url}/rest/v1/rpc/register_account_profile`,
+      {
+        method: "POST",
+        headers: buildHeaders(cfg.publishableKey, session.access_token),
+        body: JSON.stringify({
+          p_account_role: "market",
+          p_display_name: fallbackName.slice(0, 100),
+          p_municipality: fallbackMunicipality,
+          p_market_type: defaults.marketType ?? "public_market",
+          p_organization_name: (defaults.organizationName ?? fallbackName).slice(
+            0,
+            120,
+          ),
+        }),
+      },
+    );
+    if (rpcRes.ok) {
+      return (await rpcRes.json()) as UserProfile;
+    }
+  }
+
   const createRes = await fetchImpl(
-    `${cfg.url}/rest/v1/profiles?select=id,display_name,municipality,role,created_at`,
+    `${cfg.url}/rest/v1/profiles?select=*`,
     {
       method: "POST",
       headers: buildHeaders(cfg.publishableKey, session.access_token, {
@@ -234,6 +423,75 @@ export async function fetchOrCreateUserProfile(
     throw new Error("Profile creation succeeded but returned no profile record.");
   }
   return createdRows[0] as UserProfile;
+}
+
+export async function signUpWebMarketOrFarmer(
+  input: {
+    email: string;
+    password: string;
+    displayName: string;
+    municipality: string;
+    accountRole: "farmer" | "market";
+    marketType?: MarketType;
+    organizationName?: string;
+  },
+  config: SupabasePublicConfig = supabaseConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{
+  session: SupabaseSession | null;
+  profile: UserProfile | null;
+  confirmationRequired: boolean;
+}> {
+  const cfg = requireConfigured(config);
+  const email = input.email.trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    throw new Error("Enter a valid email address.");
+  }
+  if (input.password.length < 6) {
+    throw new Error("Password must be at least 6 characters.");
+  }
+
+  const res = await fetchImpl(`${cfg.url}/auth/v1/signup`, {
+    method: "POST",
+    headers: buildHeaders(cfg.publishableKey),
+    body: JSON.stringify({
+      email,
+      password: input.password,
+      data: {
+        display_name: input.displayName.trim(),
+        municipality: input.municipality,
+        account_type: input.accountRole,
+        market_type: input.marketType ?? "public_market",
+        organization_name: (
+          input.organizationName ?? input.displayName
+        ).trim(),
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, "Account registration failed"));
+  }
+
+  const data = (await res.json()) as Record<string, unknown>;
+  const session = normalizeAuthSession(data);
+  if (!session) {
+    return { session: null, profile: null, confirmationRequired: true };
+  }
+
+  const profile = await fetchOrCreateUserProfile(
+    session,
+    {
+      displayName: input.displayName,
+      municipality: input.municipality,
+      accountRole: input.accountRole,
+      marketType: input.marketType,
+      organizationName: input.organizationName,
+    },
+    cfg,
+    fetchImpl,
+  );
+  return { session, profile, confirmationRequired: false };
 }
 
 export async function signInWebUser(
@@ -317,10 +575,8 @@ export async function fetchPortalHarvestListings(
   fetchImpl: typeof fetch = fetch,
 ): Promise<LiveHarvestListing[]> {
   const cfg = requireConfigured(config);
-  // Processors only query status=eq.available (also enforced by database RLS policy harvests_read).
-  // Coordinators and admins query all statuses so they can inspect pending_verification, available, and rejected rows.
   const filter =
-    role === "coordinator" || role === "admin"
+    role === "admin" || role === "farmer"
       ? "select=*&order=created_at.desc"
       : "status=eq.available&select=*&order=created_at.desc";
 
@@ -339,6 +595,96 @@ export async function fetchPortalHarvestListings(
   return Array.isArray(rows) ? rows.map(normalizeLiveListing) : [];
 }
 
+export async function fetchLiveMarketDemands(
+  session: SupabaseSession,
+  config: SupabasePublicConfig = supabaseConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LiveMarketDemand[]> {
+  const cfg = requireConfigured(config);
+  const res = await fetchImpl(
+    `${cfg.url}/rest/v1/market_demands?select=*&order=created_at.desc`,
+    {
+      method: "GET",
+      headers: buildHeaders(cfg.publishableKey, session.access_token),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(
+      await parseErrorMessage(res, "Could not load market demands"),
+    );
+  }
+  const rows = (await res.json()) as Record<string, unknown>[];
+  return Array.isArray(rows) ? rows.map(normalizeLiveDemand) : [];
+}
+
+export async function createLiveMarketDemand(
+  session: SupabaseSession,
+  input: {
+    crop: string;
+    requiredQuantityKg: number;
+    preferredQualityGrade: string;
+    offeredPricePerKg: number;
+    municipality: string;
+    barangay: string;
+    requiredBy: string;
+    acceptPartial: boolean;
+    qualityNotes: string;
+  },
+  config: SupabasePublicConfig = supabaseConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LiveMarketDemand> {
+  const cfg = requireConfigured(config);
+  const res = await fetchImpl(`${cfg.url}/rest/v1/market_demands?select=*`, {
+    method: "POST",
+    headers: buildHeaders(cfg.publishableKey, session.access_token, {
+      Prefer: "return=representation",
+    }),
+    body: JSON.stringify({
+      market_id: session.user.id,
+      crop: input.crop,
+      required_quantity_kg: input.requiredQuantityKg,
+      unit: "kg",
+      preferred_quality_grade: input.preferredQualityGrade,
+      offered_price_php_per_kg: input.offeredPricePerKg,
+      municipality: input.municipality,
+      barangay: input.barangay.trim(),
+      required_by: input.requiredBy,
+      accept_partial: input.acceptPartial,
+      quality_notes: input.qualityNotes.trim(),
+      status: "open",
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      await parseErrorMessage(res, "Could not create market crop demand"),
+    );
+  }
+  const rows = (await res.json()) as Record<string, unknown>[];
+  return normalizeLiveDemand(rows[0] ?? {});
+}
+
+export async function fetchLiveSupplyAllocations(
+  session: SupabaseSession,
+  config: SupabasePublicConfig = supabaseConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LiveSupplyAllocation[]> {
+  const cfg = requireConfigured(config);
+  const res = await fetchImpl(
+    `${cfg.url}/rest/v1/supply_allocations?select=*&order=offered_at.desc`,
+    {
+      method: "GET",
+      headers: buildHeaders(cfg.publishableKey, session.access_token),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(
+      await parseErrorMessage(res, "Could not load supply allocations"),
+    );
+  }
+  const rows = (await res.json()) as Record<string, unknown>[];
+  return Array.isArray(rows) ? rows.map(normalizeLiveAllocation) : [];
+}
+
 export async function reviewHarvestListingRpc(
   session: SupabaseSession,
   role: SmartAniRole,
@@ -351,9 +697,9 @@ export async function reviewHarvestListingRpc(
   fetchImpl: typeof fetch = fetch,
 ): Promise<LiveHarvestListing> {
   const cfg = requireConfigured(config);
-  if (role !== "coordinator" && role !== "admin") {
+  if (role !== "admin") {
     throw new Error(
-      "Unauthorized: only a coordinator or admin account may verify or reject harvest listings.",
+      "Unauthorized: only an Admin account may verify or reject harvest listings.",
     );
   }
   if (params.decision !== "available" && params.decision !== "rejected") {
@@ -374,7 +720,7 @@ export async function reviewHarvestListingRpc(
     throw new Error(
       await parseErrorMessage(
         res,
-        "Coordinator verification RPC (review_harvest_listing) failed",
+        "Admin verification RPC (review_harvest_listing) failed",
       ),
     );
   }
@@ -383,3 +729,103 @@ export async function reviewHarvestListingRpc(
   return normalizeLiveListing(data);
 }
 
+export async function adminVerifyMarketAccountWebRpc(
+  session: SupabaseSession,
+  params: {
+    marketId: string;
+    decision: "verified" | "rejected" | "suspended";
+    notes: string;
+  },
+  config: SupabasePublicConfig = supabaseConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<UserProfile> {
+  const cfg = requireConfigured(config);
+  const res = await fetchImpl(
+    `${cfg.url}/rest/v1/rpc/admin_verify_market_account`,
+    {
+      method: "POST",
+      headers: buildHeaders(cfg.publishableKey, session.access_token),
+      body: JSON.stringify({
+        p_market_id: params.marketId,
+        p_decision: params.decision,
+        p_notes: params.notes.trim(),
+      }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(
+      await parseErrorMessage(res, "Admin Market verification RPC failed"),
+    );
+  }
+  return (await res.json()) as UserProfile;
+}
+
+export async function respondToSupplyAllocationWebRpc(
+  session: SupabaseSession,
+  params: {
+    allocationId: string;
+    decision: "reserved" | "rejected";
+    notes?: string;
+  },
+  config: SupabasePublicConfig = supabaseConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LiveSupplyAllocation> {
+  const cfg = requireConfigured(config);
+  const res = await fetchImpl(
+    `${cfg.url}/rest/v1/rpc/respond_to_supply_allocation`,
+    {
+      method: "POST",
+      headers: buildHeaders(cfg.publishableKey, session.access_token),
+      body: JSON.stringify({
+        p_allocation_id: params.allocationId,
+        p_decision: params.decision,
+        p_response_notes: (params.notes ?? "").trim(),
+      }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(
+      await parseErrorMessage(res, "Could not respond to supply offer"),
+    );
+  }
+  return normalizeLiveAllocation(
+    (await res.json()) as Record<string, unknown>,
+  );
+}
+
+export async function confirmAllocationDeliveryWebRpc(
+  session: SupabaseSession,
+  params: {
+    allocationId: string;
+    receivedQuantityKg: number;
+    finalizeShortDelivery?: boolean;
+    qualityGradeReceived?: string;
+    deliveryNotes?: string;
+  },
+  config: SupabasePublicConfig = supabaseConfig,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LiveSupplyAllocation> {
+  const cfg = requireConfigured(config);
+  const res = await fetchImpl(
+    `${cfg.url}/rest/v1/rpc/confirm_allocation_delivery`,
+    {
+      method: "POST",
+      headers: buildHeaders(cfg.publishableKey, session.access_token),
+      body: JSON.stringify({
+        p_allocation_id: params.allocationId,
+        p_received_quantity_kg: params.receivedQuantityKg,
+        p_finalize_short_delivery: Boolean(params.finalizeShortDelivery),
+        p_quality_grade_received: params.qualityGradeReceived ?? "Grade A",
+        p_delivery_notes: (params.deliveryNotes ?? "").trim(),
+      }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(
+      await parseErrorMessage(res, "Could not confirm delivery receipt"),
+    );
+  }
+  return normalizeLiveAllocation(
+    (await res.json()) as Record<string, unknown>,
+  );
+}
